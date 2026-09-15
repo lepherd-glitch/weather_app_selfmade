@@ -1,0 +1,151 @@
+---
+description: OpenWeatherMap API specifications, TypeScript interfaces, and integration guidelines
+globs: src/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# OpenWeatherMap API Integration Guidelines
+
+Official Documentation Reference: https://openweathermap.org/guide
+
+## 1. Security & Environment Configuration
+- **Server-Side Only**: Store API keys in `.env.local` as `OPENWEATHER_API_KEY`.
+- **Never Expose**: Never prefix with `NEXT_PUBLIC_` unless explicitly intended for static demo environments without backend. Always fetch weather data via React Server Components (RSC) or Next.js Route Handlers / Server Actions.
+- **Key Activation**: Note that newly issued OpenWeatherMap API keys may take up to 10–30 minutes to become active (HTTP 401 error initially).
+
+## 2. Core Endpoints & Parameters
+- **Base URL**: `https://api.openweathermap.org`
+- **Standard Parameters**:
+  - `appid`: API Key (Required)
+  - `units`: `metric` (Celsius, m/s) - Default for this project
+  - `lang`: `kr` (Korean description strings)
+
+### Common Endpoints
+1. **Current Weather**:
+   - `GET /data/2.5/weather?lat={lat}&lon={lon}&units=metric&lang=kr&appid={KEY}`
+   - `GET /data/2.5/weather?q={city_name}&units=metric&lang=kr&appid={KEY}`
+2. **5-Day / 3-Hour Forecast**:
+   - `GET /data/2.5/forecast?lat={lat}&lon={lon}&units=metric&lang=kr&appid={KEY}`
+3. **Geocoding API** (City to Coordinates):
+   - `GET /geo/1.0/direct?q={cityName}&limit={limit}&appid={KEY}`
+4. **Weather Icon URL**:
+   - `https://openweathermap.org/img/wn/{icon}@2x.png` (Supported suffixes: `@2x.png`, `@4x.png`)
+
+## 3. TypeScript Interfaces
+
+Define weather data structures adhering to the following standard shapes (prefer interfaces):
+
+```typescript
+export interface WeatherCondition {
+  id: number;
+  main: string;
+  description: string;
+  icon: string;
+}
+
+export interface WeatherMain {
+  temp: number;
+  feels_like: number;
+  temp_min: number;
+  temp_max: number;
+  pressure: number;
+  humidity: number;
+  sea_level?: number;
+  grnd_level?: number;
+}
+
+export interface WindData {
+  speed: number;
+  deg: number;
+  gust?: number;
+}
+
+export interface CurrentWeatherResponse {
+  coord: { lon: number; lat: number };
+  weather: WeatherCondition[];
+  base: string;
+  main: WeatherMain;
+  visibility: number;
+  wind: WindData;
+  clouds: { all: number };
+  dt: number;
+  sys: {
+    country: string;
+    sunrise: number;
+    sunset: number;
+  };
+  timezone: number;
+  id: number;
+  name: string;
+  cod: number;
+}
+
+export interface ForecastItem {
+  dt: number;
+  main: WeatherMain;
+  weather: WeatherCondition[];
+  clouds: { all: number };
+  wind: WindData;
+  visibility: number;
+  pop: number; // Probability of precipitation (0 to 1)
+  dt_txt: string;
+}
+
+export interface ForecastResponse {
+  cod: string;
+  message: number;
+  cnt: number;
+  list: ForecastItem[];
+  city: {
+    id: number;
+    name: string;
+    coord: { lat: number; lon: number };
+    country: string;
+    population: number;
+    timezone: number;
+    sunrise: number;
+    sunset: number;
+  };
+}
+
+export interface GeocodingLocation {
+  name: string;
+  local_names?: Record<string, string>;
+  lat: number;
+  lon: number;
+  country: string;
+  state?: string;
+}
+```
+
+## 4. Implementation Best Practices
+
+### A. Data Fetching Pattern (RSC / Server-Side)
+```typescript
+// ✅ RECOMMENDED: Server-side fetch with Next.js revalidation
+export async function getCurrentWeather(lat: number, lon: number): Promise<CurrentWeatherResponse> {
+  const apiKey = process.env.OPENWEATHER_API_KEY;
+  if (!apiKey) {
+    throw new Error('OPENWEATHER_API_KEY is not defined in environment variables');
+  }
+
+  const url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&lang=kr&appid=${apiKey}`;
+  
+  const res = await fetch(url, {
+    next: { revalidate: 600 }, // Cache for 10 minutes (OpenWeather updates every 10 min)
+  });
+
+  if (!res.ok) {
+    const errorBody = await res.text();
+    throw new Error(`OpenWeather API error [${res.status}]: ${errorBody}`);
+  }
+
+  return res.json();
+}
+```
+
+### B. Error Handling & Edge Cases
+- **401 Unauthorized**: Missing/invalid API key, or key not activated yet.
+- **404 Not Found**: Unknown city name/coordinates. Handle gracefully in UI with not-found states.
+- **429 Rate Limit**: Free tier allows 60 calls/minute and 1,000 calls/day. Use Next.js caching (`revalidate`) to prevent exhausting quotas.
+- **ODbL License Attribution**: Display "Weather data provided by OpenWeather" with a link to `https://openweathermap.org/` in the footer/credits.
